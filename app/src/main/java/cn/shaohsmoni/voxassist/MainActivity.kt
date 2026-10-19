@@ -82,6 +82,9 @@ class MainActivity : AppCompatActivity() {
         setContentView(layout)
 
         appendLog("Vox助手 v1.0 —— 全离线语音助手\n")
+        // show engine state/errors coming from the foreground service
+        AppLog.listener = { s -> appendLog(s) }
+        AppLog.snapshot().forEach { appendLog(it) }
 
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO)
             != PackageManager.PERMISSION_GRANTED) {
@@ -100,6 +103,11 @@ class MainActivity : AppCompatActivity() {
         } else {
             appendLog("✗ 麦克风权限被拒绝，语音功能不可用\n")
         }
+    }
+
+    override fun onDestroy() {
+        AppLog.listener = null
+        super.onDestroy()
     }
 
     private fun prepareAssets() {

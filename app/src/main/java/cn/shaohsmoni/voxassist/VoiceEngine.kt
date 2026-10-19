@@ -48,6 +48,9 @@ class VoiceEngine(
     companion object {
         const val SR = 16000
         const val SESSION_TIMEOUT_MS = 30_000L
+        // barge-in via VAD also hears our own TTS through the mic and would cut
+        // playback mid-sentence; disabled until AEC is wired up
+        const val BARGE_IN_ENABLED = false
     }
 
     private val running = AtomicBoolean(false)
@@ -62,17 +65,33 @@ class VoiceEngine(
     private var player: MediaPlayer? = null
     @Volatile private var speaking = false
     @Volatile private var sessionOn = false
+    @Volatile private var speakStartAt = 0L
     private var lastSpeechAt = 0L
     private val ttsFile: File by lazy { File(context.filesDir, "tts.mp3") }
 
+    // on-device TTS fallback, initialized in start()
+    private var sysTts: android.speech.tts.TextToSpeech? = null
+    @Volatile private var sysTtsReady = false
+
     fun start() {
         if (!running.compareAndSet(false, true)) return
+        initSystemTts()
         thread = Thread({ loop() }, "vox-engine").apply { start() }
     }
 
     fun stop() {
         running.set(false)
         stopPlayback()
+        try {
+            sysTts?.stop()
+        } catch (_: Exception) {
+        }
+        try {
+            sysTts?.shutdown()
+        } catch (_: Exception) {
+        }
+        sysTts = null
+        sysTtsReady = false
         thread?.interrupt()
         thread = null
         releaseModels()
@@ -80,6 +99,10 @@ class VoiceEngine(
 
     fun stopPlayback() {
         speaking = false
+        try {
+            sysTts?.stop()
+        } catch (_: Exception) {
+        }
         try {
             player?.stop()
         } catch (_: Exception) {
@@ -241,8 +264,9 @@ class VoiceEngine(
                 }
                 if (speechPresent) lastSpeechAt = System.currentTimeMillis()
 
-                // barge-in: user talks while we speak -> cut playback
-                if (speaking && speechPresent) {
+                // barge-in (disabled by default - see BARGE_IN_ENABLED)
+                if (BARGE_IN_ENABLED && speaking && speechPresent &&
+                    System.currentTimeMillis() - speakStartAt > 800) {
                     stopPlayback()
                     callbacks.onState("LISTENING")
                 }
@@ -365,19 +389,85 @@ class VoiceEngine(
                         p.prepare()
                         p.start()
                         speaking = true
+                        speakStartAt = System.currentTimeMillis()
                         player = p
                         return p
                     }
                 }
             )
             done.await()
-            // if player never started (empty stream), go back to listening
+            // if Edge TTS produced no audio, fall back to the on-device TTS engine
             if (localPlayer == null) {
-                callbacks.onState(if (sessionOn) "LISTENING" else "IDLE")
+                val ok = sysSay(text)
+                if (!ok) {
+                    callbacks.onError("Edge TTS 无音频且系统TTS不可用（检查网络/系统语音引擎）")
+                    callbacks.onState(if (sessionOn) "LISTENING" else "IDLE")
+                } else {
+                    callbacks.onState("SPEAKING")
+                }
             }
         } catch (e: Exception) {
-            callbacks.onError("TTS失败: ${e.message}")
-            callbacks.onState(if (sessionOn) "LISTENING" else "IDLE")
+            callbacks.onError("Edge TTS失败: ${e.message}，尝试系统TTS")
+            if (!sysSay(text)) {
+                callbacks.onState(if (sessionOn) "LISTENING" else "IDLE")
+            } else {
+                callbacks.onState("SPEAKING")
+            }
+        }
+    }
+
+    /** on-device TTS engine (EMUI/Huawei voice) used as a fallback when Edge TTS fails */
+    private fun initSystemTts() {
+        try {
+            val t = android.speech.tts.TextToSpeech(context) { status ->
+                sysTtsReady = status == android.speech.tts.TextToSpeech.SUCCESS
+                if (sysTtsReady) {
+                    try {
+                        sysTts?.language = java.util.Locale.SIMPLIFIED_CHINESE
+                        sysTts?.setSpeechRate(1.05f)
+                        sysTts?.setOnUtteranceProgressListener(
+                            object : android.speech.tts.UtteranceProgressListener() {
+                                override fun onStart(utteranceId: String?) {}
+                                override fun onDone(utteranceId: String?) {
+                                    speaking = false
+                                    callbacks.onState(if (sessionOn) "LISTENING" else "IDLE")
+                                }
+
+                                override fun onError(utteranceId: String?) {
+                                    speaking = false
+                                    callbacks.onState(if (sessionOn) "LISTENING" else "IDLE")
+                                }
+                            }
+                        )
+                    } catch (_: Exception) {
+                    }
+                }
+            }
+            sysTts = t
+        } catch (e: Exception) {
+            sysTts = null
+            sysTtsReady = false
+        }
+    }
+
+    private fun sysSay(text: String): Boolean {
+        if (sysTts == null) initSystemTts()
+        val t = sysTts ?: return false
+        if (!sysTtsReady) return false
+        return try {
+            t.language = java.util.Locale.SIMPLIFIED_CHINESE
+            val r = t.speak(text, android.speech.tts.TextToSpeech.QUEUE_FLUSH, null, "vox")
+            if (r == android.speech.tts.TextToSpeech.SUCCESS) {
+                speaking = true
+                speakStartAt = System.currentTimeMillis()
+                true
+            } else {
+                speaking = false
+                false
+            }
+        } catch (e: Exception) {
+            speaking = false
+            false
         }
     }
 }

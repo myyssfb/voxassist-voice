@@ -41,11 +41,21 @@ class VoiceService : Service() {
             engine = VoiceEngine(applicationContext, object : VoiceEngine.Callbacks {
                 override fun onState(state: String) {
                     android.util.Log.i("VoxAssist", "state=$state")
+                    AppLog.add("· $state\n")
                 }
                 override fun onPartial(text: String) { android.util.Log.d("VoxAssist", "partial=$text") }
-                override fun onFinal(text: String) { android.util.Log.i("VoxAssist", "final=$text") }
-                override fun onAnswer(text: String) { android.util.Log.i("VoxAssist", "answer=$text") }
-                override fun onError(msg: String) { android.util.Log.e("VoxAssist", "error=$msg") }
+                override fun onFinal(text: String) {
+                    android.util.Log.i("VoxAssist", "final=$text")
+                    AppLog.add("你说: $text\n")
+                }
+                override fun onAnswer(text: String) {
+                    android.util.Log.i("VoxAssist", "answer=$text")
+                    AppLog.add("她答: $text\n")
+                }
+                override fun onError(msg: String) {
+                    android.util.Log.e("VoxAssist", "error=$msg")
+                    AppLog.add("✗ $msg\n")
+                }
             })
             engine?.start()
         }
