@@ -50,13 +50,31 @@ class MainActivity : AppCompatActivity() {
             hint = "模型（OpenClaw 填 openclaw）"
             setText(cfg0.model)
         }
+        // the theme window is dark while AppCompat may draw black text in light mode;
+        // give the fields explicit colors so they are always readable
+        val fieldText = 0xFFFFFFFF.toInt()
+        val fieldHint = 0xFF8A93A6.toInt()
+        val fieldBg = 0xFF1E2430.toInt()
+        fun styleField(e: EditText) {
+            e.setTextColor(fieldText)
+            e.setHintTextColor(fieldHint)
+            e.setBackgroundColor(fieldBg)
+            e.setPadding(pad, pad, pad, pad)
+        }
+        styleField(baseEdit)
+        styleField(keyEdit)
+        styleField(modelEdit)
+        btn = Button(this).apply {
+            text = "启动语音助手"
+            setTextColor(0xFFFFFFFF.toInt())
+            setBackgroundColor(0xFF2B6CB0.toInt())
+        }
         log = TextView(this).apply {
             textSize = 13f
             setTextColor(0xFF9EE49E.toInt())
             typeface = android.graphics.Typeface.MONOSPACE
         }
         scroll = ScrollView(this).apply { addView(log) }
-        btn = Button(this).apply { text = "启动语音助手" }
         btn.setOnClickListener {
             GlmClient.saveConfig(
                 ctx,
@@ -72,6 +90,7 @@ class MainActivity : AppCompatActivity() {
         val layout = android.widget.LinearLayout(this).apply {
             orientation = android.widget.LinearLayout.VERTICAL
             setPadding(pad, pad, pad, pad)
+            setBackgroundColor(0xFF101418.toInt())
             addView(baseEdit)
             addView(keyEdit)
             addView(modelEdit)
