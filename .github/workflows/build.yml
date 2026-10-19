@@ -1,0 +1,63 @@
+name: build-apk
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Setup Gradle 8.10.2
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.10.2'
+
+      - name: Edge DRM self-test
+        run: |
+          # Cross-check the Java port against Python edge-tts for a fixed timestamp
+          pip install edge-tts
+          EXPECTED=$(python3 -c "
+          import edge_tts.drm as drm
+          print(drm.generate_sec_ms_gec_v2(1700000000))")
+          echo "expected=$EXPECTED"
+          mkdir -p /tmp/drmtest/cn/shaohsmoni/voxassist
+          cat > /tmp/drmtest/EdgeDrmTest.java <<'EOF'
+          import cn.shaohsmoni.voxassist.EdgeDrm;
+
+          public class EdgeDrmTest {
+            public static void main(String[] a) throws Exception {
+              String got = EdgeDrm.generateToken(1700000000.0);
+              System.out.println("got=" + got);
+              if (!got.equals("2CD23A2CA0B2595A-F3C846C370E05F9CC83ACC5F995C5F5D87A4D0F14CE8936A0F902E64099E38A2")) {
+                System.exit(1);
+              }
+              System.out.println("DRM SELF-TEST PASS");
+            }
+          }
+          EOF
+          cp app/src/main/java/cn/shaohsmoni/voxassist/EdgeDrm.java /tmp/drmtest/cn/shaohsmoni/voxassist/
+          cd /tmp/drmtest
+          javac cn/shaohsmoni/voxassist/EdgeDrm.java EdgeDrmTest.java
+          java EdgeDrmTest
+
+      - name: Build debug APK (arm64)
+        run: |
+          gradle assembleDebug --no-daemon --stacktrace
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: voxassist-apk
+          path: app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
